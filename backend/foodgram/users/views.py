@@ -1,13 +1,20 @@
+from django.shortcuts import get_object_or_404
 from django_filters import FilterSet, NumberFilter
 from djoser.views import UserViewSet as DjoserUserViewSet
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from recipes.models import Recipe
-from users.models import User
-from users.serializers import Pagination, ProfileUserSerializer, AvatarSerializer
+from users.models import User, Subscription
+from users.serializers import (
+    Pagination,
+    ProfileUserSerializer,
+    AvatarSerializer,
+    UserSubscriptionSerializer,
+)
 
 
 class UserViewSet(DjoserUserViewSet):
@@ -52,6 +59,61 @@ class UserViewSet(DjoserUserViewSet):
             user.save()
             return Response({"detail": "Аватар успешно удалён."}, status=204)
         return Response({"detail": "Аватар отсутствует."}, status=400)
+
+    @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
+    def subscriptions(self, request):
+        """Получение списка подписок текущего пользователя с поддержкой пагинации."""
+        user = request.user
+        subscriptions = User.objects.filter(followers__user=user)
+
+        paginator = self.paginator
+        paginated_subscriptions = paginator.paginate_queryset(subscriptions, request)
+
+        serializer = UserSubscriptionSerializer(
+            paginated_subscriptions,
+            many=True,
+            context={"request": request},
+        )
+
+        return paginator.get_paginated_response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["post", "delete"],
+        permission_classes=[IsAuthenticated],
+        url_path="subscribe",
+    )
+    def subscribe(self, request, id=None):
+        """Подписка и отписка на пользователя."""
+        user = request.user
+        author = self.get_object()
+
+        if request.method == "POST":
+            if user == author:
+                return Response(
+                    {"error": "Нельзя подписаться на самого себя."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            subscription, created = Subscription.objects.get_or_create(
+                user=user, author=author
+            )
+
+            if not created:
+                return Response(
+                    {
+                        "error": f"Вы уже подписаны на пользователя {author.username} (ID: {author.id})."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            serializer = UserSubscriptionSerializer(
+                author, context={"request": request}
+            )
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        get_object_or_404(Subscription, user=user, author=author).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class RecipePagination(PageNumberPagination):
