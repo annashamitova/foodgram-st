@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 # Секретный ключ для подписи кук и других безопасных операций.
 # В продакшене должен быть прочитан из переменной окружения или защищенного хранилища.
-SECRET_KEY = os.getenv("SECRET_KEY", "devkey")
+SECRET_KEY = os.getenv("SECRET_KEY", "")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # Режим отладки. В продакшене должен быть выключен (False).
