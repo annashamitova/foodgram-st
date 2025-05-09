@@ -7,6 +7,7 @@ docker-compose up
 Контейнер frontend (описанный в docker-compose.yml) соберёт необходимые файлы для фронтенда и завершит работу.
 
 Фронтенд web-приложения: http://localhost
+
 Спецификация API: http://localhost/api/docs/
 
 ## **Используемые технологии**
