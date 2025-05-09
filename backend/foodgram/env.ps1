@@ -1,0 +1,10 @@
+$env:DEBUG = "True"
+$env:SECRET_KEY = "supersecret"
+$env:API_TOKEN = "1234567890abcdef"
+$env:DB_USER = "postgres"
+$env:DB_PASSWORD = "postgres"
+$env:DB_NAME = "foodgram"
+$env:DB_PORT = "5432"
+$env:DB_HOST = "localhost"
+
+Write-Host "Succesfull"

@@ -19,16 +19,22 @@ from users.serializers import (
 
 class UserViewSet(DjoserUserViewSet):
     """
-    Наследуемся от стандартного djoser.views.UserViewSet,
-    чтобы переопределить/добавить нужные методы.
+    Расширяем стандартный UserViewSet из Djoser, чтобы добавить кастомные эндпоинты:
+    - Работа с аватаром
+    - Подписки на пользователей
+    - Список подписок текущего пользователя
     """
 
-    pagination_class = Pagination
-    queryset = User.objects.all()
-    serializer_class = ProfileUserSerializer
+    pagination_class = Pagination  # Используем собственную пагинацию
+    queryset = User.objects.all()  # Все пользователи
+    serializer_class = ProfileUserSerializer  # Базовый сериализатор для пользователя
 
     def get_permissions(self):
-        """Переопределяем разрешения для разных эндпоинтов."""
+        """
+        Назначаем разрешения в зависимости от выполняемого действия.
+        Для действий 'me' и 'avatar' требуется авторизация.
+        Остальные — как у базового класса.
+        """
         if self.action in ["me", "avatar"]:
             return [IsAuthenticated()]
         return super().get_permissions()
@@ -41,8 +47,9 @@ class UserViewSet(DjoserUserViewSet):
     )
     def avatar(self, request, *args, **kwargs):
         """
-        Метод для обновления (PUT) или удаления (DELETE) аватара
-        текущего пользователя по эндпоинту /users/me/avatar/.
+        Эндпоинт для работы с аватаром текущего пользователя.
+        PUT — загрузка нового аватара.
+        DELETE — удаление текущего аватара.
         """
         user = request.user
 
@@ -58,11 +65,14 @@ class UserViewSet(DjoserUserViewSet):
             user.avatar.delete()
             user.save()
             return Response({"detail": "Аватар успешно удалён."}, status=204)
-        return Response({"detail": "Аватар отсутствует."}, status=400)
+        return Response({"detail": "Аватар не найден."}, status=400)
 
     @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
     def subscriptions(self, request):
-        """Получение списка подписок текущего пользователя с поддержкой пагинации."""
+        """
+        Возвращает список пользователей, на которых подписан текущий пользователь.
+        Поддерживает пагинацию.
+        """
         user = request.user
         subscriptions = User.objects.filter(followers__user=user)
 
@@ -84,7 +94,11 @@ class UserViewSet(DjoserUserViewSet):
         url_path="subscribe",
     )
     def subscribe(self, request, id=None):
-        """Подписка и отписка на пользователя."""
+        """
+        Кастомное действие для подписки или отписки от конкретного пользователя.
+        POST — подписаться.
+        DELETE — отписаться.
+        """
         user = request.user
         author = self.get_object()
 
@@ -117,16 +131,23 @@ class UserViewSet(DjoserUserViewSet):
 
 
 class RecipePagination(PageNumberPagination):
-    """Пагинация рецептов"""
+    """
+    Пагинация рецептов по номеру страницы.
+    Предоставляет параметр limit для контроля количества элементов на странице.
+    """
 
-    page_size = 10
-    page_size_query_param = "limit"
-    max_page_size = 100
+    page_size = 10  # Количество рецептов на одной странице по умолчанию
+    page_size_query_param = "limit"  # Позволяет клиенту задать размер страницы
+    max_page_size = 100  # Максимально допустимое значение для limit
 
 
 class RecipeFilter(FilterSet):
     """
-    Фильтр для поиска рецептов
+    Фильтры для списка рецептов.
+    Позволяют фильтровать по:
+    - Автору рецепта
+    - Наличию в списке покупок
+    - Наличию в избранном
     """
 
     author = NumberFilter(field_name="author_id")
@@ -139,7 +160,8 @@ class RecipeFilter(FilterSet):
 
     def filter_in_shopping_cart(self, recipes_qs, name, value):
         """
-        рецепты, находящиеся в корзине текущего пользователя
+        Фильтрует рецепты, которые находятся в корзине текущего пользователя.
+        Если пользователь не авторизован — возвращает пустой QuerySet при value=1.
         """
         user = self.request.user
         if not user.is_authenticated:
@@ -151,7 +173,8 @@ class RecipeFilter(FilterSet):
 
     def filter_is_favorited(self, recipes_qs, name, value):
         """
-        рецепты, находящиеся в избранном пользователя
+        Фильтрует рецепты, которые находятся в избранном текущего пользователя.
+        Если пользователь не авторизован — возвращает пустой QuerySet при value=1.
         """
         user = self.request.user
         if not user.is_authenticated:

@@ -3,7 +3,7 @@ from rest_framework import serializers
 from django.core.files.base import ContentFile
 import base64
 
-
+# Импорты моделей и других компонентов
 from recipes.models import (
     User,
     Recipe,
@@ -16,9 +16,12 @@ from users.utils import Base64ImageField
 
 
 class RecipeShortSerializer(serializers.ModelSerializer):
-    """Сериализатор для краткого представления рецепта"""
+    """
+    Краткий сериализатор для рецептов.
+    Используется в подписках и списке избранных/в корзине — показывает минимум информации.
+    """
 
-    image = Base64ImageField()
+    image = Base64ImageField()  # Изображение в формате base64
 
     class Meta:
         model = Recipe
@@ -26,6 +29,11 @@ class RecipeShortSerializer(serializers.ModelSerializer):
 
 
 class AvatarSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для загрузки аватара пользователя через строку base64.
+    Преобразует данные из base64 в файл Django и сохраняет его.
+    """
+
     avatar = serializers.CharField(write_only=True, required=True)
 
     class Meta:
@@ -33,12 +41,15 @@ class AvatarSerializer(serializers.ModelSerializer):
         fields = ["avatar"]
 
     def validate_avatar(self, base64_string):
-        """Декодируем base64 и создаём файл-объект."""
+        """
+        Проверяет, что передано корректное изображение в формате base64.
+        Возвращает объект ContentFile, готовый к записи в модель.
+        """
         if "avatar" not in self.initial_data:
             raise serializers.ValidationError("Поле 'avatar' отсутствует в запросе.")
 
         if not base64_string:
-            raise serializers.ValidationError("Поле 'avatar' обязательно.")
+            raise serializers.ValidationError("Поле 'avatar' не может быть пустым.")
 
         try:
             format, img_str = base64_string.split(";base64,")
@@ -50,8 +61,13 @@ class AvatarSerializer(serializers.ModelSerializer):
         return ContentFile(decoded_img, name=f"user_avatar.{ext}")
 
     def update(self, instance, validated_data):
+        """
+        Обновляет аватар пользователя на основе переданных данных.
+        Если аватар не предоставлен — выбрасывает ошибку.
+        """
         if "avatar" not in validated_data:
-            raise serializers.ValidationError({"avatar": "Поле 'avatar' обязательно."})
+            raise serializers.ValidationError({"avatar": "Файл аватара обязателен."})
+
         instance.avatar = validated_data["avatar"]
         instance.save()
         return instance
@@ -59,7 +75,8 @@ class AvatarSerializer(serializers.ModelSerializer):
 
 class IngredientInRecipeWriteSerializer(serializers.ModelSerializer):
     """
-    Сериализатор для записи одного ингредиента в рецепт.
+    Сериализатор для добавления ингредиентов в рецепт (запись).
+    Принимает id ингредиента и количество.
     """
 
     id = serializers.PrimaryKeyRelatedField(
@@ -77,7 +94,8 @@ class IngredientInRecipeWriteSerializer(serializers.ModelSerializer):
 
 class IngredientInRecipeReadSerializer(serializers.ModelSerializer):
     """
-    Сериализатор для чтения связки "ингредиент в рецепте".
+    Сериализатор для чтения состава рецепта (ингредиенты + количества).
+    Возвращает поля: id, name, measurement_unit, amount.
     """
 
     id = serializers.IntegerField(source="ingredient.id")
@@ -90,6 +108,11 @@ class IngredientInRecipeReadSerializer(serializers.ModelSerializer):
 
 
 class RecipeWriteSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для создания или обновления рецепта.
+    Поддерживает добавление ингредиентов и изображения в формате base64.
+    """
+
     ingredients = IngredientInRecipeWriteSerializer(many=True, required=True)
     image = Base64ImageField()
 
@@ -98,20 +121,23 @@ class RecipeWriteSerializer(serializers.ModelSerializer):
         fields = ("id", "name", "text", "cooking_time", "image", "ingredients")
 
     def validate_ingredients(self, ingredients_data):
-        # проверка, что ингредиенты не пустые и не повторяются
+        """Проверяет, что ингредиенты указаны и не повторяются."""
         if not ingredients_data:
             raise serializers.ValidationError(
                 "Рецепт должен содержать хотя бы один ингредиент."
             )
+
         ingredient_ids = [item["ingredient"].id for item in ingredients_data]
         if len(ingredient_ids) != len(set(ingredient_ids)):
             raise serializers.ValidationError(
                 "Ингредиенты в рецепте не должны повторяться."
             )
+
         return ingredients_data
 
     @transaction.atomic
     def create(self, validated_data):
+        """Создаёт рецепт и связывает его с ингредиентами."""
         ingredients_data = validated_data.pop("ingredients")
         recipe = super().create(validated_data)
         self._create_recipe_ingredients(recipe, ingredients_data)
@@ -119,18 +145,24 @@ class RecipeWriteSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        """Обновляет рецепт и полностью заменяет список ингредиентов."""
         ingredients_data = validated_data.pop("ingredients", None)
+
         if ingredients_data is None:
             raise serializers.ValidationError(
                 {"ingredients": "Поле ingredients обязательно при обновлении."}
             )
+
         instance = super().update(instance, validated_data)
+
         if ingredients_data is not None:
             instance.recipe_ingredients.all().delete()
             self._create_recipe_ingredients(instance, ingredients_data)
+
         return instance
 
     def _create_recipe_ingredients(self, recipe, ingredients_data):
+        """Массовое создание связей между рецептом и ингредиентами."""
         RecipeIngredient.objects.bulk_create(
             RecipeIngredient(
                 recipe=recipe,
@@ -141,22 +173,22 @@ class RecipeWriteSerializer(serializers.ModelSerializer):
         )
 
     def to_representation(self, instance):
+        """Возвращает представление рецепта в виде Read-сериализатора."""
         return RecipeReadSerializer(instance, context=self.context).data
 
 
 class RecipeReadSerializer(ProfileUserSerializer):
     """
-    Сериализатор для детального/листового чтения рецепта.
+    Сериализатор для детального вывода рецепта.
+    Включает автора, список ингредиентов, флаги избранного и корзины.
     """
 
     author = ProfileUserSerializer(read_only=True)
 
-    # Список ингредиентов в виде массива {id, name, measurement_unit, amount}
     ingredients = IngredientInRecipeReadSerializer(
         many=True, read_only=True, source="recipe_ingredients"
     )
 
-    # Флаги, вычисляемые на лету
     is_in_shopping_cart = serializers.SerializerMethodField(read_only=True)
     is_favorited = serializers.SerializerMethodField(read_only=True)
 
@@ -177,8 +209,8 @@ class RecipeReadSerializer(ProfileUserSerializer):
 
     def get_is_in_shopping_cart(self, obj):
         """
-        Возвращаем True/False, есть ли этот рецепт в корзине у текущего пользователя.
-        Используем «ленивую» форму: user.is_authenticated и ...
+        Проверяет, находится ли рецепт в корзине текущего пользователя.
+        Если пользователь не авторизован — всегда False.
         """
         user = self.context["request"].user
         return (
@@ -187,8 +219,8 @@ class RecipeReadSerializer(ProfileUserSerializer):
 
     def get_is_favorited(self, obj):
         """
-        Возвращаем True/False, есть ли этот рецепт в избранном у текущего пользователя.
-        Аналогичная логика.
+        Проверяет, находится ли рецепт в избранном у текущего пользователя.
+        Если пользователь не авторизован — всегда False.
         """
         user = self.context["request"].user
         return (
@@ -198,6 +230,11 @@ class RecipeReadSerializer(ProfileUserSerializer):
 
 
 class IngredientSerializer(serializers.ModelSerializer):
+    """
+    Базовый сериализатор для модели Ingredient.
+    Возвращает id, имя и единицу измерения ингредиента.
+    """
+
     class Meta:
         model = Ingredient
         fields = ("id", "name", "measurement_unit")

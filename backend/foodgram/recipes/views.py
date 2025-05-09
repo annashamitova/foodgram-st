@@ -30,6 +30,15 @@ from .serializers import (
 
 
 class RecipeViewSet(ModelViewSet):
+    """
+    Вьюсет для работы с рецептами: создание, чтение, обновление, удаление.
+    Поддерживает действия:
+    - Добавление/удаление из избранного
+    - Добавление/удаление из корзины
+    - Скачивание списка покупок
+    - Получение короткой ссылки на рецепт
+    """
+
     queryset = Recipe.objects.all()
     permission_classes = [IsAuthorOrReadOnly]
     pagination_class = RecipePagination
@@ -37,22 +46,25 @@ class RecipeViewSet(ModelViewSet):
     filterset_class = RecipeFilter
 
     def get_serializer_class(self):
+        """Выбирает сериализатор в зависимости от действия."""
         if self.action in ["list", "retrieve"]:
             return RecipeReadSerializer
         return RecipeWriteSerializer
 
     def perform_create(self, serializer):
-        """Сохранение рецепта с автором."""
+        """Автоматически назначает автора при создании рецепта."""
         serializer.save(author=self.request.user)
 
     def toggle_relation(self, request, pk, model, error_message, success_message):
         """
-        Универсальный метод для добавления/удаления рецептов из Избранного и Корзины.
+        Универсальный метод для добавления или удаления связи между пользователем и рецептом.
+        Используется для Избранного и Корзины.
         """
-        user = request.user
-        recipe = Recipe.objects.filter(pk=pk).first()
 
-        if recipe and request.method == "POST":
+        user = request.user
+        recipe = get_object_or_404(Recipe, pk=pk)
+
+        if request.method == "POST":
             obj, created = model.objects.get_or_create(user=user, recipe=recipe)
             if not created:
                 return Response(
@@ -62,20 +74,23 @@ class RecipeViewSet(ModelViewSet):
             serializer = RecipeShortSerializer(recipe, context={"request": request})
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+        # DELETE-запрос: удаляем связь
         get_object_or_404(model, user=user, recipe=recipe).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
-        detail=True, methods=["post", "delete"], permission_classes=[IsAuthenticated]
+        detail=True,
+        methods=["post", "delete"],
+        permission_classes=[IsAuthenticated],
     )
     def shopping_cart(self, request, pk=None):
-        """Добавление/удаление рецепта в корзину покупок."""
+        """Добавляет или удаляет рецепт из списка покупок текущего пользователя."""
         return self.toggle_relation(
             request,
             pk,
             ShoppingCart,
-            error_message='Рецепт "{}" уже в корзине.',
-            success_message='Рецепт "{}" отсутствует в корзине.',
+            error_message='Рецепт "{}" уже есть в корзине.',
+            success_message='Рецепт "{}" не найден в корзине.',
         )
 
     @action(
@@ -85,12 +100,12 @@ class RecipeViewSet(ModelViewSet):
         permission_classes=[IsAuthenticated],
     )
     def favorite(self, request, pk=None):
-        """Добавление/удаление рецепта в избранное."""
+        """Добавляет или удаляет рецепт из избранного текущего пользователя."""
         return self.toggle_relation(
             request,
             pk,
             Favorite,
-            error_message='Рецепт "{}" уже в избранном.',
+            error_message='Рецепт "{}" уже находится в избранном.',
             success_message='Рецепт "{}" не найден в избранном.',
         )
 
@@ -102,8 +117,11 @@ class RecipeViewSet(ModelViewSet):
     )
     def download_shopping_cart(self, request):
         """
-        Формирует и скачивает список покупок в формате .txt.
+        Формирует текстовый файл со списком всех ингредиентов
+        из рецептов, находящихся в корзине текущего пользователя.
+        Пользователь может скачать его как .txt файл.
         """
+
         user = request.user
         cart_items = ShoppingCart.objects.filter(user=user).select_related("recipe")
 
@@ -152,7 +170,8 @@ class RecipeViewSet(ModelViewSet):
     @action(detail=True, methods=["get"], url_path="get-link")
     def get_link(self, request, pk=None):
         """
-        Возвращает короткую ссылку на рецепт.
+        Генерирует короткую ссылку на конкретный рецепт.
+        Например: /api/recipes/1/get-link → http://example.com/r/1
         """
         return Response(
             {
@@ -165,6 +184,11 @@ class RecipeViewSet(ModelViewSet):
 
 
 class IngredientFilter(FilterSet):
+    """
+    Фильтр для поиска ингредиентов по начальным буквам имени.
+    Использует lookup_expr='istartswith' — регистронезависимый поиск по началу строки.
+    """
+
     name = CharFilter(field_name="name", lookup_expr="istartswith")
 
     class Meta:
@@ -173,7 +197,10 @@ class IngredientFilter(FilterSet):
 
 
 class IngredientViewSet(ReadOnlyModelViewSet):
-    """API для получения списка ингредиентов с фильтрацией"""
+    """
+    API для просмотра списка ингредиентов.
+    Поддерживает фильтрацию по названию.
+    """
 
     queryset = Ingredient.objects.all()
     serializer_class = IngredientSerializer
@@ -185,7 +212,8 @@ class IngredientViewSet(ReadOnlyModelViewSet):
 
 def get_short_link(request, recipe_id):
     """
-    Обрабатывает короткую ссылку и перенаправляет на локальный URL рецепта.
+    Обрабатывает короткие ссылки вида /r/123/
+    Перенаправляет на полный URL рецепта.
     """
     get_object_or_404(Recipe, id=recipe_id)
     return redirect(f"/recipes/{recipe_id}/")
